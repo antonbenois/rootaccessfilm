@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="description" content="ROOT ACCESS — a film in development.">
+  <title>ROOT ACCESS</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #000; }
+    body { color: #f4f4f4; font-family: Menlo, Monaco, Consolas, 'Courier New', monospace; }
+    canvas { display: block; width: 100vw; height: 100dvh; background: #000; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    noscript { position: fixed; inset: 0; display: grid; place-items: center; font-size: clamp(1rem, 4vw, 2rem); }
+    @media (prefers-reduced-motion: reduce) {
+      canvas { display: none; }
+      .still-title { position: fixed; inset: 0; display: grid !important; place-items: center;
+        font-size: clamp(1rem, 6vw, 2.2rem); white-space: pre; }
+    }
+  </style>
+</head>
+<body>
+  <h1 class="sr-only">ROOT ACCESS</h1>
+  <p class="sr-only">A film in development.</p>
+  <div class="still-title" style="display:none" aria-hidden="true">ROOT ACCESS</div>
+  <canvas id="stage" aria-hidden="true"></canvas>
+  <noscript>ROOT ACCESS</noscript>
+  <script>
+  (() => {
+    'use strict';
+
+    const stage = document.getElementById('stage');
+    const ctx = stage.getContext('2d', { alpha: false });
+    if (!ctx) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const CYCLE = 10.2;
+    const TITLE = 'ROOT ACCESS';
+    const SYMBOLS = ['[',']','{','}','<','>','(',')','/','\\','|',':',';','.','_','+','=','*','^','~','#','$','%','&','?','@'];
+    const BRIGHT_SYMBOLS = ['#','@','%','&','{','}','[',']','/','\\','|','+','=','_','*'];
+    const TAU = Math.PI * 2;
+    const seed = 70423;
+    let randomState = seed;
+
+    let width = 0, height = 0, ratio = 1;
+    let cell = 14, cols = 0, rows = 0;
+    let titleTargets = [];
+    let particles = [];
+    let strands = [];
+    let started = performance.now();
+    let lastFrame = -1;
+
+    function rand() {
+      randomState = (1664525 * randomState + 1013904223) >>> 0;
+      return randomState / 4294967296;
+    }
+    const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+    const mix = (a, b, n) => a + (b - a) * n;
+    function smoothstep(a, b, n) {
+      let x = clamp((n - a) / (b - a), 0, 1);
+      return x * x * (3 - 2 * x);
+    }
+    function snap(v) {
+      return Math.round(v / cell) * cell + cell * 0.5;
+    }
+
+    function makeTitleTargets() {
+      const mask = document.createElement('canvas');
+      mask.width = cols;
+      mask.height = rows;
+      const m = mask.getContext('2d', { willReadFrequently: true });
+      m.fillStyle = '#000';
+      m.fillRect(0, 0, cols, rows);
+
+      let units = Math.floor(cols * 0.12);
+      units = clamp(units, 6, 18);
+      m.font = `700 ${units}px Menlo, Monaco, Consolas, 'Courier New', monospace`;
+      while (m.measureText(TITLE).width > cols * 0.88 && units > 4) {
+        units -= 1;
+        m.font = `700 ${units}px Menlo, Monaco, Consolas, 'Courier New', monospace`;
+      }
+      m.textAlign = 'center';
+      m.textBaseline = 'middle';
+      m.fillStyle = '#fff';
+      m.fillText(TITLE, cols / 2, rows * 0.50);
+      const data = m.getImageData(0, 0, cols, rows).data;
+      const picks = [];
+      for (let gy = 0; gy < rows; gy++) {
+        for (let gx = 0; gx < cols; gx++) {
+          const idx = (gy * cols + gx) * 4 + 3;
+          if (data[idx] > 10) {
+            picks.push({
+              x: gx * cell + cell * 0.5,
+              y: gy * cell + cell * 0.56,
+              glyph: BRIGHT_SYMBOLS[Math.floor(rand() * BRIGHT_SYMBOLS.length)]
+            });
+          }
+        }
+      }
+      for (let i = picks.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [picks[i], picks[j]] = [picks[j], picks[i]];
+      }
+      titleTargets = picks;
+    }
+
+    function resize() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      ratio = Math.min(window.devicePixelRatio || 1, 2);
+      stage.width = Math.round(width * ratio);
+      stage.height = Math.round(height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      randomState = seed;
+
+      cell = width < 480 ? 11 : width < 900 ? 13 : 15;
+      cols = Math.max(30, Math.floor(width / cell));
+      rows = Math.max(18, Math.floor(height / cell));
+      ctx.font = `${Math.floor(cell * 0.98)}px Menlo, Monaco, Consolas, 'Courier New', monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      makeTitleTargets();
+
+      const strandCount = width < 700 ? 8 : width < 1200 ? 11 : 15;
+      strands = [];
+      for (let i = 0; i < strandCount; i++) {
+        strands.push({
+          x: width * (0.08 + 0.84 * (i + 0.5) / strandCount) + (rand() - 0.5) * width * 0.06,
+          bend: width * mix(0.025, 0.055, rand()),
+          phase: rand() * TAU,
+          rate: mix(0.6, 1.25, rand()),
+          lean: (rand() - 0.5) * width * 0.16,
+          twist: mix(0.15, 0.45, rand())
+        });
+      }
+
+      particles = [];
+      const rootCount = clamp(Math.round(width * height / 1500), 260, 900);
+      const titleCount = Math.min(titleTargets.length, clamp(Math.round(titleTargets.length * 1.05), 120, 1100));
+      const total = Math.max(rootCount, titleCount);
+
+      for (let i = 0; i < total; i++) {
+        const strand = i % strands.length;
+        const target = titleTargets.length ? titleTargets[i % titleTargets.length] : null;
+        particles.push({
+          strand,
+          depth: rand(),
+          offset: rand(),
+          speed: mix(0.85, 1.22, rand()),
+          lateral: (rand() - 0.5) * cell * 1.2,
+          phase: rand() * TAU,
+          glyph: SYMBOLS[Math.floor(rand() * SYMBOLS.length)],
+          titleGlyph: target ? target.glyph : BRIGHT_SYMBOLS[Math.floor(rand() * BRIGHT_SYMBOLS.length)],
+          alpha: mix(0.25, 0.95, rand()),
+          drift: mix(20, 85, rand()),
+          target,
+          flicker: rand() * 100
+        });
+      }
+
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    function rootPosition(p, t) {
+      const s = strands[p.strand];
+      const rise = smoothstep(0.0, 6.2, t);
+      const head = 0.05 + 1.10 * rise * p.speed;
+      const length = 0.14 + 0.92 * smoothstep(0.5, 5.9, t);
+      const along = head - p.depth * length;
+      const y = height * (1.08 - along);
+      const hf = 1 - y / height;
+      const wave1 = Math.sin(hf * 8.0 + t * s.rate + s.phase) * s.bend;
+      const wave2 = Math.sin(hf * 15.0 - t * 0.8 + p.phase) * s.bend * 0.28;
+      const coil = Math.sin(p.depth * 11 + t * 1.4 + s.phase) * cell * 0.9;
+      const x = s.x + wave1 + wave2 + coil + s.lean * hf + p.lateral;
+      return { x, y };
+    }
+
+    function drawCellGlyph(glyph, x, y, alpha, jitter) {
+      if (alpha <= 0.01) return;
+      const sx = snap(x + jitter.x);
+      const sy = snap(y + jitter.y);
+      if (sx < -cell || sx > width + cell || sy < -cell || sy > height + cell) return;
+      ctx.fillStyle = `rgba(245,245,245,${alpha.toFixed(3)})`;
+      ctx.fillText(glyph, sx, sy);
+    }
+
+    function draw(t) {
+      const assemble = smoothstep(5.2, 7.7, t);
+      const titleHold = smoothstep(7.0, 8.0, t) * (1 - smoothstep(9.2, 10.0, t));
+      const dissolve = smoothstep(8.9, 10.05, t);
+      const intro = smoothstep(0.0, 1.5, t);
+
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        const root = rootPosition(p, t);
+        const appear = smoothstep(-0.2, 4.6, t - p.offset * 3.8) * smoothstep(0.02, 0.8, 1 - p.depth + intro * 0.45);
+        if (appear < 0.02) continue;
+
+        const target = p.target || { x: width / 2, y: height / 2 };
+        let x = mix(root.x, target.x, assemble);
+        let y = mix(root.y, target.y, assemble);
+
+        if (dissolve > 0) {
+          x += dissolve * (Math.sin(p.phase + t * 1.7) * p.drift + (target.x - width / 2) * 0.05);
+          y -= dissolve * (18 + p.drift * 1.1);
+        }
+
+        const flick = 0.78 + 0.22 * Math.sin(p.flicker + t * 9.0 + p.phase);
+        const alphaBase = p.alpha * appear * flick * (1 - 0.78 * dissolve);
+
+        const inTitle = assemble > 0.66;
+        const glyph = inTitle ? p.titleGlyph : p.glyph;
+        const alpha = inTitle
+          ? alphaBase * mix(0.82, 0.95, titleHold)
+          : alphaBase * mix(1.0, 0.82, assemble);
+
+        drawCellGlyph(glyph, x, y, alpha, {
+          x: inTitle ? Math.sin(p.phase + t * 2.0) * 0.45 : Math.sin(p.phase + t * 2.8) * 1.0,
+          y: inTitle ? Math.cos(p.phase + t * 1.8) * 0.28 : Math.cos(p.phase + t * 3.1) * 0.95
+        });
+      }
+
+      // strengthen title silhouette with extra character passes, still fully symbol-based
+      if (titleHold > 0.02 && titleTargets.length) {
+        const pulse = 0.86 + 0.14 * Math.sin(t * 6.5);
+        for (let i = 0; i < titleTargets.length; i++) {
+          const tt = titleTargets[i];
+          const jitterX = ((i % 3) - 1) * 0.4 + Math.sin(t * 2 + i) * 0.15;
+          const jitterY = (((i + 1) % 3) - 1) * 0.3;
+          const alpha = 0.06 * titleHold * pulse;
+          drawCellGlyph(tt.glyph, tt.x, tt.y, alpha, { x: jitterX, y: jitterY });
+        }
+      }
+
+      if (t > 10.08) {
+        const fade = smoothstep(10.08, CYCLE, t);
+        ctx.fillStyle = `rgba(0,0,0,${fade.toFixed(3)})`;
+        ctx.fillRect(0, 0, width, height);
+      }
+    }
+
+    const stillTime = new URLSearchParams(location.search).get('frame');
+    function frame(now) {
+      const elapsed = (now - started) / 1000;
+      const t = stillTime == null ? (elapsed % CYCLE) : clamp(Number(stillTime) || 0, 0, CYCLE);
+      if (Math.abs(t - lastFrame) > 0.001 || stillTime == null) draw(t);
+      lastFrame = t;
+      if (stillTime == null) requestAnimationFrame(frame);
+    }
+
+    window.addEventListener('resize', resize, { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) started = performance.now() - (lastFrame % CYCLE) * 1000;
+    });
+
+    resize();
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>
