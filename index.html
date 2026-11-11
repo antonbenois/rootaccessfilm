@@ -15,11 +15,6 @@
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     noscript { position: fixed; inset: 0; display: grid; place-items: center; font-size: clamp(1rem, 4vw, 2rem); }
-    @media (prefers-reduced-motion: reduce) {
-      canvas { display: none; }
-      .still-title { position: fixed; inset: 0; display: grid !important; place-items: center;
-        font-size: clamp(1rem, 6vw, 2.2rem); white-space: pre; }
-    }
   </style>
 </head>
 <body>
@@ -35,7 +30,6 @@
     const stage = document.getElementById('stage');
     const ctx = stage.getContext('2d', { alpha: false });
     if (!ctx) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     const CYCLE = 10.2;
     const TITLE = 'ROOT ACCESS';
